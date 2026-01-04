@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neo Runners by JuniorXam</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        :root { --main: #00f2ff; --bg: #050505; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: var(--bg); overflow: hidden; font-family: 'Arial Black', sans-serif; }
+
+        /* HUD & Branding */
+        #ui-layer { position: absolute; inset: 0; z-index: 100; pointer-events: none; display: none; flex-direction: column; justify-content: space-between; }
+        
+        .header { padding: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .branding { color: var(--main); font-size: 14px; letter-spacing: 2px; text-shadow: 0 0 10px var(--main); }
+        .score-box { background: rgba(0,0,0,0.8); padding: 10px 20px; border: 1px solid var(--main); border-radius: 4px; }
+        .score-val { color: #fff; font-size: 28px; font-weight: 900; }
+
+        /* Controles CSS */
+        .controls { padding: 40px; display: flex; justify-content: space-between; pointer-events: auto; }
+        .btn { 
+            width: 80px; height: 80px; background: rgba(0,242,255,0.1); border: 2px solid var(--main); 
+            border-radius: 15px; color: var(--main); font-size: 30px; cursor: pointer; 
+            display: flex; align-items: center; justify-content: center; transition: 0.1s;
+        }
+        .btn:active { background: var(--main); color: #000; transform: scale(0.9); }
+
+        /* Splash Screen */
+        #splash { 
+            position: absolute; inset: 0; background: var(--bg); z-index: 1000; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff;
+        }
+        .btn-start { 
+            margin-top: 20px; padding: 15px 40px; background: var(--main); border: none; 
+            font-weight: bold; cursor: pointer; text-transform: uppercase; border-radius: 5px;
+        }
+
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="splash">
+        <h1 style="letter-spacing: 10px; margin-bottom: 5px;">NEO RUNNERS</h1>
+        <p style="color: var(--main); letter-spacing: 3px;">BY JUNIORXAM</p>
+        <button class="btn-start" onclick="initGame()">Lançar Motor</button>
+    </div>
+
+    <div id="ui-layer">
+        <div class="header">
+            <div class="branding">CREATOR: JUNIORXAM</div>
+            <div class="score-box">
+                <span id="txt-score" class="score-val">0000</span>
+            </div>
+        </div>
+        <div class="controls">
+            <div class="btn" id="left-btn">◀</div>
+            <div class="btn" id="right-btn">▶</div>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, car, wheels = [], obstacles = [];
+        let active = false, score = 0, speed = 2.5, targetX = 0;
+        const LANE = 5;
+
+        // Função para criar o "Adesivo" via código (Canvas Texture)
+        function createSticker() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            
+            // Fundo do adesivo
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(0, 0, 512, 256);
+            
+            // Texto JUNIORXAM
+            ctx.fillStyle = "#00f2ff";
+            ctx.font = "bold 60px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("JUNIORXAM", 256, 120);
+            
+            // Borda Neon
+            ctx.strokeStyle = "#00f2ff";
+            ctx.lineWidth = 10;
+            ctx.strokeRect(20, 20, 472, 216);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+
+        function initGame() {
+            document.getElementById('splash').style.display = 'none';
+            document.getElementById('ui-layer').style.display = 'flex';
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020205);
+            scene.fog = new THREE.Fog(0x020205, 30, 180);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 6, 15);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            // Luzes
+            scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+            const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+            sun.position.set(5, 20, 10);
+            scene.add(sun);
+
+            // Estrada
+            const road = new THREE.Mesh(
+                new THREE.PlaneGeometry(20, 10000),
+                new THREE.MeshStandardMaterial({ color: 0x080808, roughness: 0.2 })
+            );
+            road.rotation.x = -Math.PI / 2;
+            scene.add(road);
+
+            // Construção do Hypercar
+            car = new THREE.Group();
+            
+            // Corpo Principal
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, metalness: 0.9, roughness: 0.1 });
+            const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.6, 5), bodyMat);
+            body.position.y = 0.6;
+            car.add(body);
+
+            // ADESIVO JUNIORXAM (Aplicado no capô)
+            const stickerMat = new THREE.MeshBasicMaterial({ map: createSticker() });
+            const stickerMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.8), stickerMat);
+            stickerMesh.position.set(0, 0.91, 0.5); // Em cima do carro
+            stickerMesh.rotation.x = -Math.PI / 2;
+            car.add(stickerMesh);
+
+            // Rodas 3D
+            const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.4, 24);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x151515 });
+            const wheelPositions = [
+                {x:-1.3, z:1.6}, {x:1.3, z:1.6}, {x:-1.3, z:-1.6}, {x:1.3, z:-1.6}
+            ];
+            wheelPositions.forEach(p => {
+                const w = new THREE.Mesh(wheelGeo, wheelMat);
+                w.rotation.z = Math.PI / 2;
+                w.position.set(p.x, 0.45, p.z);
+                car.add(w);
+                wheels.push(w);
+            });
+
+            scene.add(car);
+            
+            setupControls();
+            active = true;
+            setInterval(spawn, 350);
+            animate();
+        }
+
+        function setupControls() {
+            const moveL = () => { if(targetX > -LANE) targetX -= LANE; };
+            const moveR = () => { if(targetX < LANE) targetX += LANE; };
+
+            document.getElementById('left-btn').addEventListener('pointerdown', moveL);
+            document.getElementById('right-btn').addEventListener('pointerdown', moveR);
+            window.addEventListener('keydown', (e) => {
+                if(e.key === "ArrowLeft") moveL();
+                if(e.key === "ArrowRight") moveR();
+            });
+        }
+
+        function spawn() {
+            if(!active) return;
+            const obs = new THREE.Mesh(
+                new THREE.BoxGeometry(3.5, 2, 3),
+                new THREE.MeshStandardMaterial({ color: 0xff0044 })
+            );
+            obs.position.set((Math.floor(Math.random() * 3) - 1) * LANE, 1, -180);
+            scene.add(obs);
+            obstacles.push(obs);
+        }
+
+        function animate() {
+            if(!active) return;
+            requestAnimationFrame(animate);
+
+            // Física e Smooth Motion
+            car.position.x += (targetX - car.position.x) * 0.15;
+            car.rotation.z = -(targetX - car.position.x) * 0.08;
+            wheels.forEach(w => w.rotation.x += 0.3);
+
+            camera.position.x = car.position.x * 0.5;
+            camera.lookAt(car.position.x, 1, 0);
+
+            obstacles.forEach((o, i) => {
+                o.position.z += speed;
+                
+                // Colisão Pro
+                if(Math.abs(car.position.x - o.position.x) < 2.5 && Math.abs(o.position.z - car.position.z) < 2.5) {
+                    active = false;
+                    alert("PLACAR FINAL JUNIORXAM: " + score);
+                    location.reload();
+                }
+
+                if(o.position.z > 20) {
+                    scene.remove(o);
+                    obstacles.splice(i, 1);
+                    score += 10;
+                    document.getElementById('txt-score').innerText = score.toString().padStart(4, '0');
+                }
+            });
+
+            speed += 0.0012;
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
